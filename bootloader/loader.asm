@@ -1,34 +1,67 @@
-[org 0x7C00]       ; Ponto onde o BIOS carrega o bootloader
+[org 0x7C00]
 
 start:
     xor ax, ax
     mov ds, ax
     mov es, ax
 
-    mov bx, buffer      ; Endereço de destino da leitura
-
-    ; Ler setor 1 (setor 2 para BIOS)
-    mov ah, 0x02        ; Função: ler setor
-    mov al, 1           ; 1 setor
-    mov ch, 0           ; cilindro 0
-    mov cl, 2           ; setor 2 (setor 1 real)
-    mov dh, 0           ; cabeça 0
-    mov dl, 0           ; drive 0 (disquete)
+    ; ----------------------------
+    ; 1. Ler a TABELA (setor 2)
+    ; ----------------------------
+    mov ah, 0x02
+    mov al, 1          ; 1 setor
+    mov ch, 0          ; cilindro 0
+    mov cl, 2          ; setor 2 (índice BIOS)
+    mov dh, 0          ; cabeça 0
+    mov dl, 0x80       ; drive 0x80 = HD
+    mov bx, tabela
     int 0x13
+    jc erro
 
-    jc erro             ; se erro, pula pra erro
+    ; ----------------------------
+    ; 2. Ler os arquivos da tabela
+    ; ----------------------------
+    mov cx, 512 / 9    ; máximo de entradas = 56
+    mov si, tabela
 
+proximo_arquivo:
+    cmp byte [si], 0   ; se o nome estiver vazio, fim
+    je fim
+
+    ; pula linha antes de imprimir (só para múltiplos arquivos)
+    mov al, 0x0A
+    call print_char
+
+    ; setor onde está o conteúdo do arquivo
+    mov al, [si + 8]
+    mov ah, 0
+    mov cl, al
+    mov ch, 0
+    mov dh, 0
+    mov dl, 0x80
+    mov ah, 0x02
+    mov al, 1
+    mov bx, buffer
+    int 0x13
+    jc erro
+
+    ; ----------------------------
+    ; 3. Imprimir conteúdo do buffer
+    ; ----------------------------
     mov si, buffer
-
 print_loop:
     lodsb
     cmp al, 0
-    je fim
-    mov ah, 0x0E
-    mov bh, 0x00
-    mov bl, 0x07
-    int 0x10
+    je continuar
+    call print_char
     jmp print_loop
+
+continuar:
+    add si, 9          ; próxima entrada da tabela
+    dec cx
+    jnz proximo_arquivo
+
+    jmp fim
 
 erro:
     mov si, msg_erro
@@ -36,20 +69,36 @@ erro:
     lodsb
     cmp al, 0
     je fim
-    mov ah, 0x0E
-    mov bh, 0x00
-    mov bl, 0x0C
-    int 0x10
+    call print_char
     jmp .print_erro
 
 fim:
     cli
     hlt
 
-msg_erro db "Erro ao ler setor!", 0
+; ----------------------------
+; Subrotina de imprimir caractere
+; ----------------------------
+print_char:
+    mov ah, 0x0E
+    mov bh, 0
+    mov bl, 0x07
+    int 0x10
+    ret
 
-buffer: times 256 db 0   ; buffer reduzido pra não estourar 512 bytes
+; ----------------------------
+; Dados
+; ----------------------------
+msg_erro db "Erro ao carregar", 0
+tabela: times 72 db 0      ; suficiente para 8 entradas de 9 bytes = 72 bytes
+buffer: times 128 db 0     ; 128 bytes para o conteúdo do arquivo
 
-; Preencher até 510 bytes e colocar a assinatura de boot
-times 510-($-$$) db 0
+; ----------------------------
+; Boot Signature (obrigatória!)
+; ----------------------------
+
+%assign restante 510 - ($ - $$)
+%if restante > 0
+    times restante db 0
+%endif
 dw 0xAA55
