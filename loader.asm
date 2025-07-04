@@ -1,101 +1,82 @@
 [org 0x7C00]
+[bits 16]
 
 start:
     xor ax, ax
     mov ds, ax
     mov es, ax
+    mov ss, ax
+    mov sp, 0x7C00
 
-    ; Ler tabela (setor 2)
+    mov [boot_drive], dl
+
+    ; Mensagem de carregamento
+    mov si, msg_loading
+    call print_string
+
+    ; === Lê FAT do setor 2 ===
     mov ah, 0x02
     mov al, 1
     mov ch, 0
     mov cl, 2
     mov dh, 0
-    mov dl, 0x80
-    mov bx, tabela
-    mov es, ax         ; es = 0
+    mov dl, [boot_drive]
+    mov bx, 0x7E00
     int 0x13
-    jc erro
+    jc disk_error
 
-    mov cx, 512 / 10   ; se cada entrada tem 10 bytes: nome(8) + setor(1) + tamanho_setores(1)
-    mov si, tabela
+    ; === Leitura encadeada usando FAT ===
+    mov si, 0x7E00         ; SI aponta para FAT
+    mov bl, [si]           ; BL = setor inicial
+    mov di, 0x8000         ; destino dos dados
 
-proximo_arquivo:
-    cmp byte [si], 0
-    je fim
-
-    ; pula linha
-    mov al, 0x0A
-    call print_char
-
-    mov bl, [si + 8]       ; setor inicial
-    mov bh, 0
-    mov dl, 0x80
-    mov ch, 0
-    mov dh, 0
-
-    mov cl, 1              ; número de setores lidos no momento
-    mov al, [si + 9]       ; número de setores do arquivo
-    or al, al
-    jz proximo_setor       ; se 0, pula leitura
-
-    mov si, buffer         ; buffer offset
-    mov es, ax             ; segmento 0
-
-leitura_setor:
+.load_loop:
+    ; Lê setor atual (BL) para [DI]
     mov ah, 0x02
-    mov al, 1              ; 1 setor por vez
-    mov bx, si
+    mov al, 1
+    mov ch, 0
+    mov cl, bl
+    mov dh, 0
+    mov dl, [boot_drive]
+    mov bx, di
     int 0x13
-    jc erro
+    jc disk_error
 
-    ; imprimir setor lido
-    mov di, si
-    mov cx, 512
-print_buffer:
-    mov al, [es:di]
-    cmp al, 0
-    je fim_impressao
-    call print_char
-    inc di
-    loop print_buffer
+    add di, 512            ; avança no buffer
+    inc si                 ; próxima entrada na FAT
+    mov bl, [si]           ; próximo setor
 
-fim_impressao:
-    inc bl                 ; próximo setor
-    inc cl
-    cmp cl, [si + 9]
-    jle leitura_setor
+    cmp bl, 0xFF           ; fim da cadeia?
+    jne .load_loop
 
-proximo_setor:
-    add si, 10             ; próxima entrada da tabela
-    loop proximo_arquivo
+    ; Mostra o conteúdo carregado
+    mov si, 0x8000
+    call print_string
+    jmp $
 
-fim:
-    cli
-    hlt
-
-erro:
-    mov si, msg_erro
-.print_erro:
+; --- Funções ---
+print_string:
+    pusha
+.loop:
     lodsb
     cmp al, 0
-    je fim
-    call print_char
-    jmp .print_erro
-
-print_char:
+    je .done
     mov ah, 0x0E
-    mov bh, 0
-    mov bl, 0x07
     int 0x10
+    jmp .loop
+.done:
+    popa
     ret
 
-msg_erro db "Erro ao carregar", 0
-tabela equ 0x0500      ; endereço na RAM onde vamos guardar a tabela
-buffer  equ 0x0600     ; endereço na RAM onde vamos guardar o conteúdo dos arquivos
+disk_error:
+    mov si, msg_error
+    call print_string
+    jmp $
 
-%assign restante 510 - ($ - $$)
-%if restante > 0
-    times restante db 0
-%endif
+; --- Dados ---
+boot_drive db 0
+msg_loading db "Carregando via FAT...", 0x0D, 0x0A, 0
+msg_error db "Erro de disco!", 0
+
+times 510-($-$$) db 0
 dw 0xAA55
