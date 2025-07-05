@@ -1,17 +1,13 @@
-💻 Como testar
-Compile com NASM:
+Compile o loader.asm novamente:
 
-nasm -f bin -o loader.bin loader.asm
+nasm -f bin loader.asm -o loader.bin
 
-Rode o script Python:
+Cruze os dedos! Se ele compilar sem erro, você terá um loader.bin de 512 bytes.
 
-python make_img.py
+Gere a Imagem do Disco:
 
-Execute com QEMU:
+python create_disk_image.py
 
-qemu-system-x86_64 -fda disk.img
+Execute no QEMU:
 
-Você verá:
-
-Carregando via FAT...
-HELLO, VITOR!
+qemu-system-i386 -fda bootable_disk.img -no-shutdown
